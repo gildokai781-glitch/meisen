@@ -1,0 +1,564 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+"http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+<title>Me&sen messeger - Online</title>
+
+<style type="text/css">
+body {
+    background-color: #3A6EA5;
+    font-family: Tahoma, Arial, sans-serif;
+    margin: 0;
+}
+
+.window {
+    width: 400px;
+    margin: 40px auto;
+    background-color: #ECE9D8;
+    border: 2px solid #000080;
+}
+
+.titlebar {
+    background-color: #000080;
+    color: #FFFFFF;
+    padding: 6px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.content {
+    padding: 10px;
+    font-size: 12px;
+}
+
+input, textarea, select {
+    width: 100%;
+    font-size: 12px;
+    margin-bottom: 6px;
+    box-sizing: border-box;
+}
+
+button {
+    font-size: 12px;
+    padding: 4px 10px;
+    margin-right: 5px;
+}
+
+.contact {
+    background-color: #FFFFFF;
+    border: 1px solid #999999;
+    padding: 5px;
+    margin-bottom: 4px;
+    cursor: pointer;
+}
+
+.contact:hover {
+    background-color: #DDEEFF;
+}
+
+.contact.online {
+    border-left: 4px solid #00CC00;
+}
+
+.contact.offline {
+    border-left: 4px solid #CC0000;
+    opacity: 0.6;
+}
+
+/* CHAT POPUP */
+.chatPopup {
+    position: absolute;
+    width: 350px;
+    height: 400px;
+    background-color: #ECE9D8;
+    border: 2px solid #000080;
+    top: 100px;
+    left: 100px;
+    z-index: 100;
+    box-shadow: 5px 5px 15px rgba(0,0,0,0.3);
+}
+
+.chatTitlebar {
+    background-color: #000080;
+    color: #FFFFFF;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: move;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.chatContent {
+    padding: 10px;
+    height: calc(100% - 60px);
+    display: flex;
+    flex-direction: column;
+}
+
+#chatBox {
+    background-color: #FFFFFF;
+    border: 1px solid #999999;
+    flex-grow: 1;
+    overflow: auto;
+    padding: 8px;
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+
+.message {
+    margin-bottom: 8px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    max-width: 80%;
+}
+
+.message.self {
+    background-color: #E3F2FD;
+    margin-left: auto;
+    border: 1px solid #BBDEFB;
+}
+
+.message.other {
+    background-color: #F5F5F5;
+    margin-right: auto;
+    border: 1px solid #E0E0E0;
+}
+
+.message.sender {
+    font-weight: bold;
+    color: #000080;
+    font-size: 10px;
+}
+
+.message.time {
+    font-size: 9px;
+    color: #666;
+    text-align: right;
+}
+
+textarea {
+    resize: none;
+    height: 60px;
+}
+
+.userStatus {
+    font-size: 10px;
+    float: right;
+}
+
+.statusOnline {
+    color: #00CC00;
+}
+
+.statusOffline {
+    color: #CC0000;
+}
+
+#onlineUsers {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #CCC;
+    padding: 5px;
+    background: white;
+    margin-bottom: 10px;
+}
+</style>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+
+<script type="text/javascript">
+// CONFIGURAÇÃO FIREBASE - SUBSTITUA COM SEUS DADOS
+const firebaseConfig = {
+    apiKey: "SUA_API_KEY",
+    authDomain: "SEU_PROJETO.firebaseapp.com",
+    databaseURL: "https://SEU_PROJETO-default-rtdb.firebaseio.com",
+    projectId: "SEU_PROJETO",
+    storageBucket: "SEU_PROJETO.appspot.com",
+    messagingSenderId: "SEU_SENDER_ID",
+    appId: "SEU_APP_ID"
+};
+
+// Inicializar Firebase
+firebase.initializeApp(firebaseConfig);
+const database = firebase.database();
+
+// Variáveis globais
+let currentUser = "";
+let userId = "";
+let chats = {};
+let onlineUsers = {};
+
+// LOGIN
+function login() {
+    const user = document.getElementById("user").value.trim();
+    const pass = document.getElementById("pass").value;
+    
+    if(user !== "" && pass !== "") {
+        currentUser = user;
+        userId = generateUserId();
+        
+        document.getElementById("login").style.display = "none";
+        document.getElementById("home").style.display = "block";
+        document.getElementById("username").innerHTML = user;
+        
+        // Inicializar usuário no Firebase
+        initializeUser();
+        
+        // Monitorar usuários online
+        monitorOnlineUsers();
+    } else {
+        alert("Digite usuário e senha.");
+    }
+}
+
+// LOGOUT
+function logout() {
+    if (userId) {
+        // Marcar como offline
+        database.ref('users/' + userId).update({
+            online: false,
+            lastSeen: new Date().toISOString()
+        });
+    }
+    
+    currentUser = "";
+    userId = "";
+    document.getElementById("home").style.display = "none";
+    document.getElementById("login").style.display = "block";
+    
+    // Fechar todas as janelas de chat
+    Object.keys(chats).forEach(chatId => {
+        closeChat(chatId);
+    });
+    chats = {};
+}
+
+// GERAR ID ÚNICO
+function generateUserId() {
+    return 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+}
+
+// INICIALIZAR USUÁRIO NO FIREBASE
+function initializeUser() {
+    const userRef = database.ref('users/' + userId);
+    
+    // Definir dados do usuário
+    userRef.set({
+        name: currentUser,
+        online: true,
+        lastSeen: new Date().toISOString(),
+        userId: userId
+    });
+    
+    // Atualizar presença
+    userRef.onDisconnect().update({
+        online: false,
+        lastSeen: new Date().toISOString()
+    });
+}
+
+// MONITORAR USUÁRIOS ONLINE
+function monitorOnlineUsers() {
+    const usersRef = database.ref('users');
+    
+    usersRef.on('value', (snapshot) => {
+        onlineUsers = {};
+        const usersList = document.getElementById('onlineUsers');
+        usersList.innerHTML = '';
+        
+        snapshot.forEach((childSnapshot) => {
+            const userData = childSnapshot.val();
+            
+            if (userData.userId !== userId) {
+                onlineUsers[userData.userId] = userData;
+                
+                // Adicionar à lista
+                const userDiv = document.createElement('div');
+                userDiv.className = `contact ${userData.online ? 'online' : 'offline'}`;
+                userDiv.innerHTML = `
+                    ${userData.online ? '🟢' : '🔴'} ${userData.name}
+                    <span class="userStatus ${userData.online ? 'statusOnline' : 'statusOffline'}">
+                        ${userData.online ? 'Online' : 'Offline'}
+                    </span>
+                `;
+                userDiv.onclick = () => openChat(userData.userId, userData.name);
+                usersList.appendChild(userDiv);
+            }
+        });
+    });
+}
+
+// ABRIR CHAT
+function openChat(targetUserId, targetUserName) {
+    if (!chats[targetUserId]) {
+        const chatId = `chat_${targetUserId}`;
+        const chatDiv = document.createElement("div");
+        chatDiv.className = "chatPopup";
+        chatDiv.id = chatId;
+        
+        // Posição aleatória para múltiplas janelas
+        const left = 50 + Object.keys(chats).length * 30;
+        const top = 50 + Object.keys(chats).length * 20;
+        chatDiv.style.left = `${left}px`;
+        chatDiv.style.top = `${top}px`;
+        
+        chatDiv.innerHTML = `
+            <div class="chatTitlebar" onmousedown="dragStart(event, '${chatId}')">
+                <span>Conversando com ${targetUserName}</span>
+                <button style="font-size:10px;" onclick="closeChat('${targetUserId}')">X</button>
+            </div>
+            <div class="chatContent">
+                <div id="box_${targetUserId}" class="chatBox"></div>
+                <div style="display: flex; gap: 5px;">
+                    <textarea id="msg_${targetUserId}" rows="2" placeholder="Digite sua mensagem..."></textarea>
+                    <button onclick="sendMessage('${targetUserId}')" style="height: fit-content;">Enviar</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(chatDiv);
+        chats[targetUserId] = {
+            name: targetUserName,
+            div: chatDiv
+        };
+        
+        // Carregar mensagens anteriores
+        loadMessages(targetUserId);
+        
+        // Monitorar novas mensagens
+        monitorMessages(targetUserId);
+    }
+    
+    // Trazer janela para frente
+    const chat = document.getElementById(`chat_${targetUserId}`);
+    if (chat) {
+        chat.style.zIndex = 1000;
+        Object.keys(chats).forEach(id => {
+            if (id !== targetUserId) {
+                const otherChat = document.getElementById(`chat_${id}`);
+                if (otherChat) otherChat.style.zIndex = 100;
+            }
+        });
+    }
+}
+
+// ENVIAR MENSAGEM
+function sendMessage(targetUserId) {
+    const msgInput = document.getElementById(`msg_${targetUserId}`);
+    const message = msgInput.value.trim();
+    
+    if (message !== "") {
+        const messageId = database.ref('messages').push().key;
+        const messageData = {
+            from: userId,
+            to: targetUserId,
+            text: message,
+            timestamp: new Date().toISOString(),
+            senderName: currentUser
+        };
+        
+        // Salvar no Firebase
+        database.ref('messages/' + messageId).set(messageData);
+        
+        // Adicionar à própria tela
+        appendMessage(targetUserId, currentUser, message, true);
+        
+        // Limpar campo
+        msgInput.value = "";
+    }
+}
+
+// CARREGAR MENSAGENS
+function loadMessages(targetUserId) {
+    const messagesRef = database.ref('messages');
+    const chatBox = document.getElementById(`box_${targetUserId}`);
+    
+    messagesRef.orderByChild('timestamp').once('value', (snapshot) => {
+        chatBox.innerHTML = '';
+        
+        snapshot.forEach((childSnapshot) => {
+            const msg = childSnapshot.val();
+            
+            // Filtrar mensagens entre os dois usuários
+            if ((msg.from === userId && msg.to === targetUserId) || 
+                (msg.from === targetUserId && msg.to === userId)) {
+                const isSelf = msg.from === userId;
+                appendMessageDOM(chatBox, msg.senderName, msg.text, isSelf, msg.timestamp);
+            }
+        });
+        
+        // Rolar para baixo
+        chatBox.scrollTop = chatBox.scrollHeight;
+    });
+}
+
+// MONITORAR NOVAS MENSAGENS
+function monitorMessages(targetUserId) {
+    const messagesRef = database.ref('messages');
+    
+    messagesRef.orderByChild('timestamp').on('child_added', (snapshot) => {
+        const msg = snapshot.val();
+        
+        // Verificar se a mensagem é para este chat
+        if (msg.to === userId && msg.from === targetUserId) {
+            const chatBox = document.getElementById(`box_${targetUserId}`);
+            if (chatBox) {
+                appendMessageDOM(chatBox, msg.senderName, msg.text, false, msg.timestamp);
+                chatBox.scrollTop = chatBox.scrollHeight;
+                
+                // Tocar som
+                playSound();
+                
+                // Piscar na barra de título
+                const chatDiv = document.getElementById(`chat_${targetUserId}`);
+                if (chatDiv && document.hidden) {
+                    flashTitle(`Nova mensagem de ${msg.senderName}`);
+                }
+            }
+        }
+    });
+}
+
+// ADICIONAR MENSAGEM AO DOM
+function appendMessageDOM(chatBox, sender, text, isSelf, timestamp) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${isSelf ? 'self' : 'other'}`;
+    
+    const time = new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    
+    messageDiv.innerHTML = `
+        <div class="message.sender">${sender}</div>
+        <div>${text}</div>
+        <div class="message.time">${time}</div>
+    `;
+    
+    chatBox.appendChild(messageDiv);
+}
+
+// APENAS PARA COMPATIBILIDADE
+function appendMessage(chatName, sender, msg, isSelf) {
+    const chatBox = document.getElementById(`box_${chatName}`);
+    if (chatBox) {
+        appendMessageDOM(chatBox, sender, msg, isSelf, new Date().toISOString());
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+}
+
+// FECHAR CHAT
+function closeChat(targetUserId) {
+    const chatDiv = document.getElementById(`chat_${targetUserId}`);
+    if (chatDiv) {
+        document.body.removeChild(chatDiv);
+        delete chats[targetUserId];
+    }
+}
+
+// SOM DE MENSAGEM
+function playSound() {
+    const audio = new Audio('https://www.soundjay.com/button/sounds/button-16.mp3');
+    audio.play().catch(e => console.log("Erro ao tocar som:", e));
+}
+
+// PISCAR TÍTULO
+function flashTitle(message) {
+    let originalTitle = document.title;
+    let isFlashing = false;
+    
+    const flash = () => {
+        document.title = isFlashing ? originalTitle : message;
+        isFlashing = !isFlashing;
+    };
+    
+    const interval = setInterval(flash, 1000);
+    
+    // Parar quando a janela receber foco
+    window.onfocus = () => {
+        clearInterval(interval);
+        document.title = originalTitle;
+    };
+}
+
+// DRAG & DROP (mantido do original)
+let dragObject = null;
+let offsetX = 0;
+let offsetY = 0;
+
+function dragStart(e, id) {
+    dragObject = document.getElementById(id);
+    offsetX = e.clientX - dragObject.offsetLeft;
+    offsetY = e.clientY - dragObject.offsetTop;
+    document.onmousemove = dragMove;
+    document.onmouseup = dragEnd;
+    
+    // Trazer para frente
+    dragObject.style.zIndex = 1000;
+}
+
+function dragMove(e) {
+    if(dragObject) {
+        dragObject.style.left = (e.clientX - offsetX) + "px";
+        dragObject.style.top = (e.clientY - offsetY) + "px";
+    }
+}
+
+function dragEnd() {
+    dragObject = null;
+    document.onmousemove = null;
+    document.onmouseup = null;
+}
+
+// Permitir enviar mensagem com Enter
+document.addEventListener('keypress', function(e) {
+    if (e.key === 'Enter' && e.ctrlKey) {
+        const activeElement = document.activeElement;
+        if (activeElement && activeElement.id.startsWith('msg_')) {
+            const targetUserId = activeElement.id.split('_')[1];
+            sendMessage(targetUserId);
+        }
+    }
+});
+</script>
+</head>
+
+<body>
+
+<div class="window">
+    <div class="titlebar">Me&sen Messenger - Online</div>
+    <div class="content">
+
+        <!-- LOGIN -->
+        <div id="login">
+            <p><strong>Entrar no Me&sen Messenger Online</strong></p>
+            <p style="font-size: 11px; color: #666;">Digite qualquer nome de usuário (não requer senha real)</p>
+            Nome de usuário:<br>
+            <input type="text" id="user" placeholder="Seu nome">
+            Senha:<br>
+            <input type="password" id="pass" placeholder="Qualquer senha" value="123">
+            <button onclick="login()">Entrar</button>
+        </div>
+
+        <!-- HOME -->
+        <div id="home" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <p>Conectado como <strong id="username"></strong></p>
+                <button onclick="logout()" style="font-size: 11px;">Sair</button>
+            </div>
+            
+            <p><strong>Usuários Online:</strong></p>
+            <div id="onlineUsers"></div>
+            
+            <p style="font-size: 11px; color: #666; margin-top: 15px;">
+                🟢 Online | 🔴 Offline<br>
+                Clique em um usuário para conversar
+            </p>
+        </div>
+
+    </div>
+</div>
+
+</body>
+</html>
